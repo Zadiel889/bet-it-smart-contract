@@ -127,6 +127,42 @@ contract BrokerImplementation is BrokerStorage, NameVersion {
         }
     }
 
+    function getUserStatuses(address account, address pool, string[] memory symbols) external view returns (uint256[] memory) {
+        uint256[] memory statuses = new uint256[](symbols.length);
+        for (uint256 i = 0; i < symbols.length; i++) {
+            statuses[i] = getUserStatus(account, pool, keccak256(abi.encodePacked(symbols[i])));
+        }
+        return statuses;
+    }
+
+    // Return value:
+    // 1: User never entered bet, no client
+    // 2: User is holding a betting volume
+    // 3: User closed bet normally
+    // 4: User is liquidated
+    // 0: Wrong query, e.g. wrong symbolId etc.
+    function getUserStatus(address account, address pool, bytes32 symbolId) public view returns (uint256 status) {
+        Bet storage bet = bets[account][pool][symbolId];
+        address client = bet.client;
+        if (client == address(0)) {
+            status = 1;
+        } else {
+            IDToken pToken = IDToken(IPoolComplement(pool).pToken());
+            uint256 pTokenId = pToken.getTokenIdOf(client);
+            if (pTokenId != 0) {
+                address symbol = ISymbolManagerComplement(IPoolComplement(pool).symbolManager()).symbols(symbolId);
+                if (symbol != address(0)) {
+                    ISymbolComplement.Position memory p = ISymbolComplement(symbol).positions(pTokenId);
+                    if (p.volume != 0) {
+                        status = 2;
+                    } else {
+                        status = p.cumulativeFundingPerVolume != 0 ? 3 : 4;
+                    }
+                }
+            }
+        }
+    }
+
     function claimRewardAsLpVenus(address pool, address[] memory clients) external _onlyAdmin_ {
         for (uint256 i = 0; i < clients.length; i++) {
             IClient(clients[i]).claimRewardAsLpVenus(pool);
